@@ -64,7 +64,7 @@ def write_disclaimer(f):
 
 
 def fc_open(name):
-    verbose("writing %s" % name)
+    verbose(f"writing {name}")
     f = open(name, "w")
     write_disclaimer(f)
     return f
@@ -85,11 +85,7 @@ def get_choices(allchoices):
 
 
 def without(allparts, part):
-    result = []
-    for i in allparts:
-        if i not in part:
-            result.append(i)
-    return result
+    return [i for i in allparts if i not in part]
 
 # A simple container for a type alias
 
@@ -135,8 +131,8 @@ def parse_fields(string, types):
     if typeinfo["struct_type"] == "float":
         mo = re.search("^(\D+)(\d+)$", typeinfo["dataio_type"])
         assert mo
-        typeinfo["dataio_type"] = mo.group(1)
-        typeinfo["float_factor"] = int(mo.group(2))
+        typeinfo["dataio_type"] = mo[1]
+        typeinfo["float_factor"] = int(mo[2])
 
     # analyze fields
     fields = []
@@ -148,27 +144,23 @@ def parse_fields(string, types):
             arr = x.split(":")
             if len(arr) == 1:
                 return [x, x, x]
-            else:
-                assert len(arr) == 2
-                arr.append("old->"+arr[1])
-                arr[1] = "real_packet->"+arr[1]
-                return arr
+            assert len(arr) == 2
+            arr.append(f"old->{arr[1]}")
+            arr[1] = f"real_packet->{arr[1]}"
+            return arr
 
         mo = re.search(r"^(.*)\[(.*)\]\[(.*)\]$", i)
         if mo:
-            t["name"] = mo.group(1)
+            t["name"] = mo[1]
             t["is_array"] = 2
-            t["array_size1_d"], t["array_size1_u"], t["array_size1_o"] = f(
-                mo.group(2))
-            t["array_size2_d"], t["array_size2_u"], t["array_size2_o"] = f(
-                mo.group(3))
+            t["array_size1_d"], t["array_size1_u"], t["array_size1_o"] = f(mo[2])
+            t["array_size2_d"], t["array_size2_u"], t["array_size2_o"] = f(mo[3])
         else:
             mo = re.search(r"^(.*)\[(.*)\]$", i)
             if mo:
-                t["name"] = mo.group(1)
+                t["name"] = mo[1]
                 t["is_array"] = 1
-                t["array_size_d"], t["array_size_u"], t["array_size_o"] = f(
-                    mo.group(2))
+                t["array_size_d"], t["array_size_u"], t["array_size_o"] = f(mo[2])
             else:
                 t["name"] = i
                 t["is_array"] = 0
@@ -176,7 +168,7 @@ def parse_fields(string, types):
 
     # analyze flags
     flaginfo = {}
-    arr = list(item.strip() for item in flags.split(","))
+    arr = [item.strip() for item in flags.split(",")]
     arr = list(filter(lambda x: len(x) > 0, arr))
     flaginfo["is_key"] = ("key" in arr)
     if flaginfo["is_key"]:
@@ -190,27 +182,19 @@ def parse_fields(string, types):
     for i in arr:
         mo = re.search("^add-cap\((.*)\)$", i)
         if mo:
-            adds.append(mo.group(1))
+            adds.append(mo[1])
             continue
         mo = re.search("^remove-cap\((.*)\)$", i)
         if mo:
-            removes.append(mo.group(1))
+            removes.append(mo[1])
             continue
         remaining.append(i)
     arr = remaining
-    assert len(arr) == 0, repr(arr)
+    assert not arr, repr(arr)
     assert len(adds)+len(removes) in [0, 1]
 
-    if adds:
-        flaginfo["add_cap"] = adds[0]
-    else:
-        flaginfo["add_cap"] = ""
-
-    if removes:
-        flaginfo["remove_cap"] = removes[0]
-    else:
-        flaginfo["remove_cap"] = ""
-
+    flaginfo["add_cap"] = adds[0] if adds else ""
+    flaginfo["remove_cap"] = removes[0] if removes else ""
     # print typeinfo,flaginfo,fields
     result = []
     for f in fields:
@@ -235,13 +219,13 @@ class Field:
         return result
 
     def get_handle_type(self):
-        if self.dataio_type == "string" or self.dataio_type == "estring":
+        if self.dataio_type in ["string", "estring"]:
             return "const char *"
         if self.dataio_type == "worklist":
-            return "const %s *" % self.struct_type
+            return f"const {self.struct_type} *"
         if self.is_array:
-            return "const %s *" % self.struct_type
-        return self.struct_type+" "
+            return f"const {self.struct_type} *"
+        return f"{self.struct_type} "
 
     # Returns code which is used in the declaration of the field in
     # the packet struct.
@@ -260,7 +244,7 @@ class Field:
             return "  worklist_copy(&real_packet->%(name)s, %(name)s);" % self.__dict__
         if self.is_array == 0:
             return "  real_packet->%(name)s = %(name)s;" % self.__dict__
-        if self.dataio_type == "string" or self.dataio_type == "estring":
+        if self.dataio_type in ["string", "estring"]:
             return "  sz_strlcpy(real_packet->%(name)s, %(name)s);" % self.__dict__
         if self.is_array == 1:
             tmp = "real_packet->%(name)s[i] = %(name)s[i]" % self.__dict__
@@ -291,7 +275,7 @@ class Field:
             return "  differ = (old->%(name)s != real_packet->%(name)s);" % self.__dict__
 
         sizes = None, None
-        if self.dataio_type == "string" or self.dataio_type == "estring":
+        if self.dataio_type in ["string", "estring"]:
             c = "strcmp(old->%(name)s[i], real_packet->%(name)s[i]) != 0" % self.__dict__
             sizes = self.array_size1_o, self.array_size1_u
         elif self.is_struct:
@@ -386,14 +370,17 @@ class Field:
 
         arr_types = ["string", "estring", "city_map"]
         if (self.dataio_type in arr_types and self.is_array == 1) or \
-           (self.dataio_type not in arr_types and self.is_array == 0):
+               (self.dataio_type not in arr_types and self.is_array == 0):
             return "  DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s);" % self.__dict__
         if self.is_struct:
-            if self.is_array == 2:
-                c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, &real_packet->%(name)s[i][j]);" % self.__dict__
-            else:
-                c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, &real_packet->%(name)s[i]);" % self.__dict__
-        elif self.dataio_type == "string" or self.dataio_type == "estring":
+            c = (
+                "DIO_PUT(%(dataio_type)s, &dout, &field_addr, &real_packet->%(name)s[i][j]);"
+                % self.__dict__
+                if self.is_array == 2
+                else "DIO_PUT(%(dataio_type)s, &dout, &field_addr, &real_packet->%(name)s[i]);"
+                % self.__dict__
+            )
+        elif self.dataio_type in ["string", "estring"]:
             c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i]);" % self.__dict__
             array_size_u = self.array_size1_u
 
@@ -402,11 +389,10 @@ class Field:
                 c = "  DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i][j], %(float_factor)d);" % self.__dict__
             else:
                 c = "  DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i], %(float_factor)d);" % self.__dict__
+        elif self.is_array == 2:
+            c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i][j]);" % self.__dict__
         else:
-            if self.is_array == 2:
-                c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i][j]);" % self.__dict__
-            else:
-                c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i]);" % self.__dict__
+            c = "DIO_PUT(%(dataio_type)s, &dout, &field_addr, real_packet->%(name)s[i]);" % self.__dict__
 
         if deltafragment and self.diff and self.is_array == 1:
             return '''
@@ -426,7 +412,7 @@ class Field:
 
     }''' % self.get_dict(vars())
         if self.is_array == 2 and self.dataio_type != "string" \
-           and self.dataio_type != "estring":
+               and self.dataio_type != "estring":
             return '''
     {
       int i, j;
@@ -477,7 +463,7 @@ class Field:
   RECEIVE_PACKET_FIELD_ERROR(%(name)s);
 }''' % self.__dict__
         if self.dataio_type in ["string", "estring", "city_map"] and \
-           self.is_array != 2:
+               self.is_array != 2:
             return '''if (!DIO_GET(%(dataio_type)s, &din, &field_addr, real_packet->%(name)s, sizeof(real_packet->%(name)s))) {
   RECEIVE_PACKET_FIELD_ERROR(%(name)s);
 }''' % self.__dict__
@@ -509,7 +495,7 @@ class Field:
                 c = '''if (!DIO_GET(%(dataio_type)s, &din, &field_addr, &real_packet->%(name)s[i])) {
       RECEIVE_PACKET_FIELD_ERROR(%(name)s);
     }''' % self.__dict__
-        elif self.dataio_type == "string" or self.dataio_type == "estring":
+        elif self.dataio_type in ["string", "estring"]:
             c = '''if (!DIO_GET(%(dataio_type)s, &din, &field_addr, real_packet->%(name)s[i], sizeof(real_packet->%(name)s[i]))) {
       RECEIVE_PACKET_FIELD_ERROR(%(name)s);
     }''' % self.__dict__
@@ -558,21 +544,22 @@ class Field:
             array_size_d = self.array_size_d
 
         if not self.diff or self.dataio_type == "memory":
-            if array_size_u != array_size_d:
-                extra = '''
+            extra = (
+                '''
   if (%(array_size_u)s > %(array_size_d)s) {
     RECEIVE_PACKET_FIELD_ERROR(%(name)s, ": truncation array");
-  }''' % self.get_dict(vars())
-            else:
-                extra = ""
+  }'''
+                % self.get_dict(vars())
+                if array_size_u != array_size_d
+                else ""
+            )
             if self.dataio_type == "memory":
                 return '''%(extra)s
   if (!DIO_GET(%(dataio_type)s, &din, &field_addr, real_packet->%(name)s, %(array_size_u)s)) {
     RECEIVE_PACKET_FIELD_ERROR(%(name)s);
   }''' % self.get_dict(vars())
-            if self.is_array == 2 and self.dataio_type != "string" \
-                    and self.dataio_type != "estring":
-                return '''
+            return (
+                '''
 {
   int i, j;
 
@@ -582,9 +569,12 @@ class Field:
       %(c)s
     }
   }
-}''' % self.get_dict(vars())
-            else:
-                return '''
+}'''
+                % self.get_dict(vars())
+                if self.is_array == 2
+                and self.dataio_type != "string"
+                and self.dataio_type != "estring"
+                else '''
 {
   int i;
 
@@ -592,8 +582,10 @@ class Field:
   for (i = 0; i < %(array_size_u)s; i++) {
     %(c)s
   }
-}''' % self.get_dict(vars())
-        elif deltafragment and self.diff and self.is_array == 1:
+}'''
+                % self.get_dict(vars())
+            )
+        elif deltafragment and self.is_array == 1:
             return '''
 {
 int count;
@@ -653,9 +645,11 @@ class Variant:
         self.negcaps = negcaps
         if self.poscaps or self.negcaps:
             def f(cap):
-                return 'has_capability("%s", capability)' % (cap)
-            t = (list(map(lambda x, f=f: f(x), self.poscaps)) +
-                 list(map(lambda x, f=f: '!'+f(x), self.negcaps)))
+                return f'has_capability("{cap}", capability)'
+
+            t = list(map(lambda x, f=f: f(x), self.poscaps)) + list(
+                map(lambda x, f=f: f'!{f(x)}', self.negcaps)
+            )
             self.condition = " && ".join(t)
         else:
             self.condition = "true"
@@ -663,8 +657,9 @@ class Variant:
         self.other_fields = list(filter(lambda x: not x.is_key, self.fields))
         self.bits = len(self.other_fields)
         self.keys_format = ", ".join(["%d"]*len(self.key_fields))
-        self.keys_arg = ", ".join(map(lambda x: "real_packet->"+x.name,
-                                      self.key_fields))
+        self.keys_arg = ", ".join(
+            map(lambda x: f"real_packet->{x.name}", self.key_fields)
+        )
         if self.keys_arg:
             self.keys_arg = ",\n    "+self.keys_arg
 
@@ -678,20 +673,20 @@ class Variant:
         self.extra_send_args = ""
         self.extra_send_args2 = ""
         self.extra_send_args3 = ", ".join(
-            map(lambda x: "%s%s" % (x.get_handle_type(), x.name),
-                self.fields))
+            map(lambda x: f"{x.get_handle_type()}{x.name}", self.fields)
+        )
         if self.extra_send_args3:
-            self.extra_send_args3 = ", "+self.extra_send_args3
+            self.extra_send_args3 = f", {self.extra_send_args3}"
 
         if not self.no_packet:
             self.extra_send_args = ', const struct %(packet_name)s *packet' % self.__dict__ + \
-                self.extra_send_args
-            self.extra_send_args2 = ', packet'+self.extra_send_args2
+                    self.extra_send_args
+            self.extra_send_args2 = f', packet{self.extra_send_args2}'
 
         if self.want_force:
-            self.extra_send_args = self.extra_send_args+', bool force_to_send'
-            self.extra_send_args2 = self.extra_send_args2+', force_to_send'
-            self.extra_send_args3 = self.extra_send_args3+', bool force_to_send'
+            self.extra_send_args += ', bool force_to_send'
+            self.extra_send_args2 += ', force_to_send'
+            self.extra_send_args3 += ', bool force_to_send'
 
         self.receive_prototype = 'static struct %(packet_name)s *receive_%(name)s(struct connection *pc)' % self.__dict__
         self.send_prototype = 'static int send_%(name)s(struct connection *pc%(extra_send_args)s)' % self.__dict__
@@ -713,7 +708,7 @@ class Variant:
     # Returns a code fragment which contains the declarations of the
     # statistical counters of this packet.
     def get_stats(self):
-        names = map(lambda x: '"'+x.name+'"', self.other_fields)
+        names = map(lambda x: f'"{x.name}"', self.other_fields)
         names = ", ".join(names)
 
         return '''static int stats_%(name)s_sent;
@@ -772,11 +767,11 @@ static char *stats_%(name)s_names[] = {%(names)s};
 
 ''' % self.__dict__
 
-        keys = list(map(lambda x: "key->"+x.name, self.key_fields))
+        keys = list(map(lambda x: f"key->{x.name}", self.key_fields))
         if len(keys) == 1:
             a = keys[0]
         elif len(keys) == 2:
-            a = "(%s << 8) ^ %s" % (keys[0], keys[1])
+            a = f"({keys[0]} << 8) ^ {keys[1]}"
         else:
             assert 0
         body = body+('  return %s;\n' % a)
@@ -794,10 +789,13 @@ static char *stats_%(name)s_names[] = {%(names)s};
 {
 ''' % self.__dict__
         body = ""
-        body = body+'''  const struct %(packet_name)s *key1 = (const struct %(packet_name)s *) vkey1;
+        body += (
+            '''  const struct %(packet_name)s *key1 = (const struct %(packet_name)s *) vkey1;
   const struct %(packet_name)s *key2 = (const struct %(packet_name)s *) vkey2;
 
-''' % self.__dict__
+'''
+            % self.__dict__
+        )
         for field in self.key_fields:
             body = body+'''  return key1->%s == key2->%s;
 ''' % (field.name, field.name)
@@ -847,15 +845,8 @@ static char *stats_%(name)s_names[] = {%(names)s};
 
         if not self.no_packet:
             real_packet1 = "  const struct %(packet_name)s *real_packet = packet;\n"
-        else:
-            real_packet1 = ""
-
-        if not self.no_packet:
             if self.delta:
-                if self.want_force:
-                    diff = 'force_to_send'
-                else:
-                    diff = '0'
+                diff = 'force_to_send' if self.want_force else '0'
                 delta_header = '''
   %(name)s_fields fields;
   struct %(packet_name)s *old;
@@ -871,6 +862,8 @@ static char *stats_%(name)s_names[] = {%(names)s};
                     body = body+field.get_put(0)+"\n"
             body = body+"\n"
         else:
+            real_packet1 = ""
+
             body = ""
             delta_header = ""
 
@@ -884,10 +877,10 @@ static char *stats_%(name)s_names[] = {%(names)s};
 
         faddr = ''
 
-        for i in range(2):
+        for _ in range(2):
             for k, v in vars().items():
                 if isinstance(v, str):
-                    temp = temp.replace("<%s>" % k, v)
+                    temp = temp.replace(f"<{k}>", v)
         return temp % self.get_dict(vars())
 
     # '''
@@ -913,15 +906,8 @@ static char *stats_%(name)s_names[] = {%(names)s};
         for i in range(len(self.other_fields)):
             field = self.other_fields[i]
             body = body+field.get_cmp_wrapper(i)
-        if self.gen_log:
-            fl = '    %(log_macro)s("  no change -> discard");\n'
-        else:
-            fl = ""
-        if self.gen_stats:
-            s = '    stats_%(name)s_discarded++;\n'
-        else:
-            s = ""
-
+        fl = '    %(log_macro)s("  no change -> discard");\n' if self.gen_log else ""
+        s = '    stats_%(name)s_discarded++;\n' if self.gen_stats else ""
         if self.is_info != "no":
             body = body+'''
   if (different == 0) {
@@ -966,6 +952,7 @@ static char *stats_%(name)s_names[] = {%(names)s};
 }
 
 '''
+        body1 = ""
         if self.delta:
             delta_header = '''
   %(name)s_fields fields;
@@ -975,14 +962,12 @@ static char *stats_%(name)s_names[] = {%(names)s};
             delta_body1 = '''
   DIO_BV_GET(&din, &field_addr, fields);
   '''
-            body1 = ""
             for field in self.key_fields:
                 body1 = body1+prefix("  ", field.get_get(1))+"\n"
             body2 = self.get_delta_receive_body()
         else:
             delta_header = ""
             delta_body1 = ""
-            body1 = ""
             for field in self.fields:
                 body1 = body1+prefix("  ", field.get_get(0))+"\n"
             if not body1:
@@ -1002,28 +987,24 @@ static char *stats_%(name)s_names[] = {%(names)s};
 
         faddr = ''
 
-        for i in range(2):
+        for _ in range(2):
             for k, v in vars().items():
                 if isinstance(v, str):
-                    temp = temp.replace("<%s>" % k, v)
+                    temp = temp.replace(f"<{k}>", v)
         return temp % self.get_dict(vars())
 
     # Helper for get_receive()
     def get_delta_receive_body(self):
-        key1 = map(lambda x: "    %s %s = real_packet->%s;" %
-                   (x.struct_type, x.name, x.name), self.key_fields)
-        key2 = map(lambda x: "    real_packet->%s = %s;" %
-                   (x.name, x.name), self.key_fields)
-        key1 = "\n".join(key1)
-        key2 = "\n".join(key2)
-        if key1:
-            key1 = key1+"\n\n"
-        if key2:
+        key1 = map(
+            lambda x: f"    {x.struct_type} {x.name} = real_packet->{x.name};",
+            self.key_fields,
+        )
+        key2 = map(lambda x: f"    real_packet->{x.name} = {x.name};", self.key_fields)
+        if key1 := "\n".join(key1):
+            key1 += "\n\n"
+        if key2 := "\n".join(key2):
             key2 = "\n\n"+key2
-        if self.gen_log:
-            fl = '    %(log_macro)s("  no old info");\n'
-        else:
-            fl = ""
+        fl = '    %(log_macro)s("  no old info");\n' if self.gen_log else ""
         body = '''
   if (NULL == *hash) {
     *hash = genhash_new_full(hash_%(name)s, cmp_%(name)s,
